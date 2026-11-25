@@ -4,3 +4,4 @@ Append-only. One line per operation: `## [YYYY-MM-DD] op | title` where op is on
 
 ## [2026-11-25] init | scaffolded
 ## [2026-11-25] build | first version: cw.py, hub skill
+- 2026-11-25: licence check. Only claim is MIT for own code (LICENSE matches); no ORC, SRD, OGL or third-party game content bundled, nothing to attribute.
