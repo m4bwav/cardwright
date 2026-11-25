@@ -180,11 +180,13 @@ def mm_to_px(mm, dpi):
 def sheet(images, out, page="letter", dpi=300, card_mm=(63, 88), bleed_mm=0.0,
           cols=3, rows=3, marks=True):
     """Lay card images on pages, cols x rows each, centred, with crop marks.
+    Cards sit edge to edge at trim size; an image with bleed_mm of bleed has
+    the bleed cut off first (3x3 poker cards with bleed do not fit Letter).
     Returns the list of files written (one PNG per page, or one PDF)."""
     from PIL import Image, ImageDraw
     pages_mm = {"letter": (215.9, 279.4), "a4": (210.0, 297.0)}
     pw, ph = (mm_to_px(v, dpi) for v in pages_mm[page])
-    cw, ch = (mm_to_px(v + 2 * bleed_mm, dpi) for v in card_mm)
+    cw, ch = (mm_to_px(v, dpi) for v in card_mm)
     if cols * cw > pw or rows * ch > ph:
         die(f"{cols}x{rows} cards of {card_mm[0]}x{card_mm[1]} mm do not fit on {page}")
     x0, y0 = (pw - cols * cw) // 2, (ph - rows * ch) // 2
@@ -194,11 +196,16 @@ def sheet(images, out, page="letter", dpi=300, card_mm=(63, 88), bleed_mm=0.0,
         pg = Image.new("RGB", (pw, ph), "white")
         d = ImageDraw.Draw(pg)
         for j, path in enumerate(images[i:i + per]):
-            card = Image.open(path).convert("RGB").resize((cw, ch))
+            card = Image.open(path).convert("RGB")
+            if bleed_mm:
+                bx = round(card.width * bleed_mm / (card_mm[0] + 2 * bleed_mm))
+                by = round(card.height * bleed_mm / (card_mm[1] + 2 * bleed_mm))
+                card = card.crop((bx, by, card.width - bx, card.height - by))
+            card = card.resize((cw, ch))
             x, y = x0 + (j % cols) * cw, y0 + (j // cols) * ch
             pg.paste(card, (x, y))
         if marks:
-            b = mm_to_px(bleed_mm, dpi)
+            b = 0
             tick = mm_to_px(4, dpi)
             xs = sorted({x0 + c * cw + off for c in range(cols) for off in (b, cw - b)})
             ys = sorted({y0 + r * ch + off for r in range(rows) for off in (b, ch - b)})

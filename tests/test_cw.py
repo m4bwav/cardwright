@@ -80,3 +80,9 @@ def test_sheet_too_big(tmp_path):
 def test_cli_exit_codes(capsys):
     assert cw.main(["curve", str(CARDS)]) == 1
     assert cw.main(["rarity", str(CARDS), "--bands", '{"common":0.7,"uncommon":0.2,"rare":0.1}']) == 0
+
+
+def test_sheet_with_bleed_fits_letter(tmp_path):
+    pytest.importorskip("PIL")
+    files = _imgs(tmp_path, [(0, 90, 0)] * 9)
+    assert len(cw.sheet(files, tmp_path / "b.pdf", bleed_mm=3)) == 1

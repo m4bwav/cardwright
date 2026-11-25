@@ -24,7 +24,7 @@ Method notes and sources: [references/balance.md](references/balance.md).
 
 ## Print and play
 
-`cw.py sheet <folder> --out deck.pdf --page letter --card 63x88 --bleed 3` lays 3x3 cards per page, centred, with crop marks at the trim lines. Images should be rendered at 300 DPI: 744x1039 px trim, 815x1110 px with 3 mm bleed. Tell the person to print at 100% (no "fit to page") and check one card with a ruler. Details: [references/print.md](references/print.md).
+`cw.py sheet <folder> --out deck.pdf --page letter --card 63x88 --bleed 3` lays 3x3 cards per page edge to edge at trim size, centred, with crop marks at the trim lines; `--bleed` says how much bleed the images carry, and it is cut off on the sheet (one cut between cards). Print houses want the full-bleed files instead. Images should be rendered at 300 DPI: 744x1039 px trim, 815x1110 px with 3 mm bleed. Tell the person to print at 100% (no "fit to page") and check one card with a ruler. Details: [references/print.md](references/print.md).
 
 ## Frames
 
