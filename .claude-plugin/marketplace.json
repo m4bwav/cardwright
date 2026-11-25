@@ -1,0 +1,5 @@
+{
+  "name": "cardwright",
+  "owner": {"name": "Mark Rogers"},
+  "plugins": [{"name": "cardwright", "source": "./", "description": "Set-level checks for card games: curve, rarity, vanilla test, art consistency, print-and-play sheets"}]
+}

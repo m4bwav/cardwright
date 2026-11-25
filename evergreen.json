@@ -1,0 +1,47 @@
+{
+  "evergreen": "1.0",
+  "name": "cardwright",
+  "kind": "plugin",
+  "main": "skills/cardwright/SKILL.md",
+  "files": {
+    "research": "RESEARCH.md",
+    "changelog": "CHANGELOG.md",
+    "learnings": "LEARNINGS.md",
+    "tests": "TESTS.md"
+  },
+  "protocol": "plugin",
+  "source": null,
+  "topic": "Card game design tooling: print-and-play standards (card sizes, bleed, DPI, print houses), balance heuristics (cost curves, vanilla test, rarity odds in deckbuilders), open-source card tools (Squib, nanDECK) and card-game MCP servers",
+  "tier": "slow",
+  "interval_days": 60,
+  "last_checked": "2026-11-25",
+  "next_due": "2027-01-24",
+  "verify_at_use": false,
+  "volatile_claims": [
+    "Slay the Spire rarity odds and pity counter values",
+    "print house file specs (The Game Crafter, MakePlayingCards)"
+  ],
+  "contradiction": null,
+  "events": [],
+  "streak": {
+    "quiet": 0,
+    "pinned_min": 0,
+    "pinned_max": 0,
+    "vau_quiet": 0
+  },
+  "history": [
+    {
+      "date": "2026-11-25",
+      "m": null,
+      "interval_after": 60,
+      "note": "created"
+    }
+  ],
+  "counts": {
+    "learnings": 0,
+    "changes": 1,
+    "research": 1,
+    "tests": 1
+  },
+  "consolidate_every": 25
+}

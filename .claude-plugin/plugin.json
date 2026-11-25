@@ -1,0 +1,8 @@
+{
+  "name": "cardwright",
+  "version": "0.1.0",
+  "description": "Set-level checks for card games: cost curve, rarity mix, vanilla-test outliers, art consistency across a set, and print-and-play sheets with crop marks. Engine-agnostic; reads a CSV or JSON card list and an art folder.",
+  "author": {"name": "Mark Rogers"},
+  "license": "MIT",
+  "repository": "https://github.com/m4bwav/cardwright"
+}

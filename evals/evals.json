@@ -1,0 +1,29 @@
+{
+  "skill": "cardwright",
+  "cases": [
+    {
+      "id": "trigger-curve",
+      "kind": "trigger",
+      "prompt": "Is the mana curve of my deckbuilder OK? Cards are in cards.csv.",
+      "expect": "cardwright invoked; cw.py curve run"
+    },
+    {
+      "id": "decoy-art",
+      "kind": "decoy",
+      "prompt": "Generate a new card illustration of a space station.",
+      "expect": "cardwright NOT invoked (art generation)"
+    },
+    {
+      "id": "action-balance",
+      "kind": "action",
+      "prompt": "Check tests/fixtures/cards.csv for balance problems: curve, rarity (my targets are 70% common, 20% uncommon, 10% rare) and overstatted cards. Write findings to balance.md.",
+      "expect": "cw.py curve, rarity --bands, vanilla run; balance.md names the cost-4 gap, Titan and Brute as strong, rarity within bands"
+    },
+    {
+      "id": "action-sheet",
+      "kind": "action",
+      "prompt": "Make a print-and-play PDF on Letter from the card images in ./art (make 10 solid-colour 744x1039 PNGs there first for the test).",
+      "expect": "cw.py sheet --out *.pdf run; PDF has 2 pages"
+    }
+  ]
+}
