@@ -2,7 +2,7 @@
 
 ![cardwright banner](.github/images/banner.jpg)
 
-Set-level checks for card games, as a Claude Code plugin. Point it at a card list and an art folder and it tells you where the cost curve has holes, whether the rarity mix matches your targets, which cards are overstatted for their cost, which illustrations do not match the rest of the set, and it lays out print-and-play sheets.
+Set-level checks for card games, as an agent plugin. Point it at a card list and an art folder and it tells you where the cost curve has holes, whether the rarity mix matches your targets, which cards are overstatted for their cost, which illustrations do not match the rest of the set, and it lays out print-and-play sheets.
 
 ## What it does
 
