@@ -14,9 +14,16 @@ Run as `python "${CLAUDE_PLUGIN_ROOT}/scripts/cw.py" <command>`. Card list: CSV 
 1. `cw.py curve cards.csv` draws the cost curve and flags gaps and any cost holding over 35% of the set. Deckbuilders usually want most cards cheap; say what the curve means for the first turns.
 2. `cw.py rarity cards.csv --bands '{"common":0.6,"uncommon":0.3,"rare":0.1}'` compares the mix with the project's targets (default: Slay the Spire's 60/37/3 for normal rewards). Ask for the project's own bands if unknown.
 3. `cw.py vanilla cards.csv --per-cost 2 --base 1` flags units whose attack plus health is far from the cost line. A smell test: read each flagged card's text before calling it broken, since abilities are upside the numbers cannot see. Fit `--per-cost` to the set's own median first.
-4. Report the flags with a suggested fix each (cost +1, stat -1, move to uncommon). Hand changes to the project's card tool; never edit engine assets from here without the person's yes.
+4. `cw.py vanilla cards.csv --by-rarity` prints the mean stat surplus per rarity and flags a tier more than 1.0 above common. Rarity is not a power budget: assume top players own every card.
+5. `cw.py dupes cards.csv` warns on exact twins (merge or differentiate) and strictly better cards at the same cost (sometimes deliberate; ask).
+6. Report the flags with a suggested fix each (cost +1, stat -1, move to uncommon). Hand changes to the project's card tool; never edit engine assets from here without the person's yes.
 
 Method notes and sources: [references/balance.md](references/balance.md).
+
+## Rules text and prototype
+
+- `cw.py rules rules.md --glossary terms.txt` lints rules text: other names for a glossary term (lines `term: alias1, alias2`), sentences over 40 words (`--max-words`), ambiguous phrases (cardwright's own list: "in order to", "and/or", "may not", "up to", "should"...), and with `--max-grade 8` a Flesch-Kincaid cap. Use the grade cap on rulebook paragraphs only; short card text gives noisy grades.
+- `cw.py manifest cards.csv --players 5 --rules rules.md` checks the box for the top player count. Columns: `per_player` (copies each player needs), `base` (copies needed at any count, default 0), `copies` (copies in the box, default 1). Needed = base + per_player x players. With `--rules` it also lists cards the rules never name (plural `s`/`es` counts).
 
 ## Art consistency
 
@@ -24,7 +31,7 @@ Method notes and sources: [references/balance.md](references/balance.md).
 
 ## Print and play
 
-`cw.py sheet <folder> --out deck.pdf --page letter --card 63x88 --bleed 3` lays 3x3 cards per page edge to edge at trim size, centred, with crop marks at the trim lines; `--bleed` says how much bleed the images carry, and it is cut off on the sheet (one cut between cards). Print houses want the full-bleed files instead. Images should be rendered at 300 DPI: 744x1039 px trim, 815x1110 px with 3 mm bleed. Tell the person to print at 100% (no "fit to page") and check one card with a ruler. Details: [references/print.md](references/print.md).
+`cw.py sheet <folder> --out deck.pdf --page letter --card 63x88 --bleed 3` lays 3x3 cards per page edge to edge at trim size, centred, with crop marks at the trim lines; `--bleed` says how much bleed the images carry, and it is cut off on the sheet (one cut between cards). Print houses want the full-bleed files instead. Images should be rendered at 300 DPI: 744x1039 px trim, 815x1110 px with 3 mm bleed. Tell the person to print at 100% (no "fit to page") and check one card with a ruler. Add `--backs cards.csv` (columns `deck`, `back`) to fail before rendering when two decks share a back image. Details: [references/print.md](references/print.md).
 
 ## Frames
 
