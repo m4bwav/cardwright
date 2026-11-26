@@ -12,8 +12,10 @@ Exit 0 ok, 1 problems found, 2 usage or input error.
 import argparse
 import colorsys
 import csv
+import hashlib
 import json
 import math
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -228,6 +230,211 @@ def sheet(images, out, page="letter", dpi=300, card_mm=(63, 88), bleed_mm=0.0,
     return written
 
 
+# ---- dupes ----------------------------------------------------------------
+
+STAT_KEYS = ("attack", "health", "power", "toughness")
+SKIP_KEYS = {"name", "cost", "rarity", "art", "back", "deck", "copies", "per_player", "base", "id"}
+
+
+def _stats(c):
+    return {k: num(c.get(k)) for k in STAT_KEYS if num(c.get(k)) is not None}
+
+
+def _rest(c):
+    """Non-identity, non-stat fields (type, text, ...) normalised."""
+    return {k.lower(): str(v).strip().lower() for k, v in c.items()
+            if k and k.lower() not in SKIP_KEYS and k.lower() not in STAT_KEYS
+            and v not in (None, "")}
+
+
+def dupes(cards):
+    """Exact twins (same cost, stats and text) and strict dominance (same cost,
+    same other text, every stat >= and one >). Warnings only: a strictly better
+    near-copy can be deliberate (Kobold Guide p. 95)."""
+    probs = []
+    seen = {}
+    for c in cards:
+        key = (num(c.get("cost")), tuple(sorted(_stats(c).items())), tuple(sorted(_rest(c).items())))
+        seen.setdefault(key, []).append(c.get("name", "?"))
+    for names in seen.values():
+        if len(names) > 1:
+            probs.append(f"twin: {', '.join(names)} have the same cost and stats/text")
+    for i, a in enumerate(cards):
+        for b in cards[i + 1:]:
+            cost = num(a.get("cost"))
+            if cost is None or cost != num(b.get("cost")):
+                continue
+            sa, sb = _stats(a), _stats(b)
+            if not sa or set(sa) != set(sb) or _rest(a) != _rest(b):
+                continue
+            for hi, lo, shi, slo in ((a, b, sa, sb), (b, a, sb, sa)):
+                if all(shi[k] >= slo[k] for k in shi) and any(shi[k] > slo[k] for k in shi):
+                    probs.append(f"dominates: {hi.get('name', '?')} is strictly better than "
+                                 f"{lo.get('name', '?')} at cost {cost}")
+    return probs
+
+
+# ---- vanilla by rarity -----------------------------------------------------
+
+RARITY_ORDER = ["common", "uncommon", "rare", "mythic", "legendary"]
+
+
+def vanilla_by_rarity(cards, per_cost=2.0, base=1.0, tolerance=1.0):
+    """Mean stat surplus (stats minus base + per_cost * cost) per rarity. Warn
+    when a rarer tier beats common by more than tolerance: rarity is not a
+    power budget (Kobold Guide p. 96-97)."""
+    groups = {}
+    for c in cards:
+        cost = num(c.get("cost"))
+        a = num(c.get("attack", c.get("power")))
+        h = num(c.get("health", c.get("toughness")))
+        if cost is None or a is None or h is None:
+            continue
+        r = (c.get("rarity") or "none").strip().lower()
+        groups.setdefault(r, []).append((a + h) - (base + per_cost * cost))
+    means = {r: statistics.mean(v) for r, v in groups.items()}
+    probs = []
+    if "common" in means:
+        for r, m in means.items():
+            if r != "common" and m - means["common"] > tolerance:
+                probs.append(f"rarity {r}: mean surplus {m:+.2f}, common {means['common']:+.2f} "
+                             f"(over by {m - means['common']:.2f}, tolerance {tolerance:g})")
+    order = sorted(means, key=lambda r: RARITY_ORDER.index(r) if r in RARITY_ORDER else 99)
+    return [(r, len(groups[r]), means[r]) for r in order], probs
+
+
+# ---- rules text lint --------------------------------------------------------
+
+# Our own list: phrases that read two ways in rules text.
+AMBIGUOUS = {
+    "in order to": "can read as a sequence; say 'to'",
+    "and/or": "say 'or', 'and', or 'one or both'",
+    "may not": "permission or possibility? say 'cannot'",
+    "up to": "say whether zero counts",
+    "should": "rule or advice? say 'must' or 'may'",
+    "each other": "say which players or cards",
+    "end of turn": "whose turn? say 'the end of this turn'",
+    "next turn": "whose turn? say 'your next turn'",
+    "etc": "list every case",
+}
+
+
+def load_glossary(path):
+    """Lines 'term: alias1, alias2'. Returns {alias: term}."""
+    out = {}
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        term, aliases = line.split(":", 1)
+        for al in aliases.split(","):
+            al = al.strip().lower()
+            if al:
+                out[al] = term.strip()
+    return out
+
+
+def _sentences(text):
+    text = re.sub(r"^\s*#+ .*$", "", text, flags=re.M)  # headings are not sentences
+    text = re.sub(r"\s+", " ", text)
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+
+def _syllables(word):
+    w = re.sub(r"[^a-z]", "", word.lower())
+    if not w:
+        return 0
+    groups, prev = 0, False
+    for ch in w:
+        v = ch in "aeiouy"
+        if v and not prev:
+            groups += 1
+        prev = v
+    if w.endswith("e") and groups > 1 and not w.endswith("le"):
+        groups -= 1
+    return max(1, groups)
+
+
+def fk_grade(text):
+    sents = _sentences(text)
+    words = [w for s in sents for w in s.split()]
+    if not sents or not words:
+        return 0.0
+    syl = sum(_syllables(w) for w in words)
+    return 0.39 * len(words) / len(sents) + 11.8 * syl / len(words) - 15.59
+
+
+def rules_lint(text, glossary=None, max_words=40, max_grade=None):
+    """Other names for a glossary term, long sentences, ambiguous phrases, and
+    optionally a Flesch-Kincaid grade cap (Kobold Guide p. 107-114)."""
+    probs = []
+    low = text.lower()
+    for alias, term in (glossary or {}).items():
+        n = len(re.findall(r"\b" + re.escape(alias) + r"\b", low))
+        if n:
+            probs.append(f"term: '{alias}' used {n}x, glossary name is '{term}'")
+    for s in _sentences(text):
+        n = len(s.split())
+        if n > max_words:
+            probs.append(f"long: {n} words: {s[:60]}...")
+    for phrase, why in AMBIGUOUS.items():
+        n = len(re.findall(r"\b" + re.escape(phrase) + r"\b", low))
+        if n:
+            probs.append(f"ambiguous: '{phrase}' {n}x, {why}")
+    if max_grade is not None:
+        g = fk_grade(text)
+        if g > max_grade:
+            probs.append(f"grade: Flesch-Kincaid {g:.1f}, cap {max_grade:g}")
+    return probs
+
+
+# ---- deck backs -------------------------------------------------------------
+
+def shared_backs(cards):
+    """Decks (deck column) that use the same back image (back column), by path
+    or by identical file bytes. Players must tell decks apart from the back
+    (Kobold Guide p. 120)."""
+    decks = {}
+    for c in cards:
+        d, b = (c.get("deck") or "").strip(), (c.get("back") or "").strip()
+        if d and b:
+            decks.setdefault(d, set()).add(b)
+    owners = {}
+    for d, backs in decks.items():
+        for b in backs:
+            p = Path(b)
+            key = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else b.lower()
+            owners.setdefault(key, set()).add(d)
+    return [f"backs: decks {', '.join(sorted(ds))} share a back image"
+            for ds in owners.values() if len(ds) > 1]
+
+
+# ---- manifest ---------------------------------------------------------------
+
+def manifest(cards, players, rules_text=None):
+    """Copies needed at max players against supplied (Kobold Guide p. 118-119,
+    125). Columns: per_player (copies each player needs), base (copies needed
+    at any count, default 0), copies (copies in the box, default 1).
+    Needed = base + per_player * players. With rules text, also lists cards
+    whose name never appears in it."""
+    probs = []
+    for c in cards:
+        pp, base = num(c.get("per_player")) or 0, num(c.get("base")) or 0
+        supplied = num(c.get("copies"))
+        supplied = 1 if supplied is None else supplied
+        need = base + pp * players
+        if need > supplied:
+            probs.append(f"short: {c.get('name', '?')} needs {need:g} at {players} players, "
+                         f"box has {supplied:g}")
+    if rules_text is not None:
+        low = rules_text.lower()
+        for c in cards:
+            n = (c.get("name") or "").strip()
+            if n and not re.search(r"\b" + re.escape(n.lower()) + r"(e?s)?\b", low):
+                probs.append(f"unmentioned: {n} is not named in the rules")
+    return probs
+
+
 # ---- main -----------------------------------------------------------------
 
 def parse_map(s):
@@ -254,7 +461,23 @@ def main(argv=None):
     v.add_argument("cards")
     v.add_argument("--per-cost", type=float, default=2.0)
     v.add_argument("--base", type=float, default=1.0)
-    v.add_argument("--tolerance", type=float, default=1.5)
+    v.add_argument("--tolerance", type=float, default=None,
+                   help="outlier tolerance (1.5); with --by-rarity, rare-over-common tolerance (1.0)")
+    v.add_argument("--by-rarity", action="store_true", help="mean stat surplus per rarity")
+
+    du = sub.add_parser("dupes", help="exact twins and strictly better cards (warnings)")
+    du.add_argument("cards")
+
+    ru = sub.add_parser("rules", help="rules text lint")
+    ru.add_argument("file")
+    ru.add_argument("--glossary", help="lines 'term: alias1, alias2'")
+    ru.add_argument("--max-words", type=int, default=40)
+    ru.add_argument("--max-grade", type=float, help="Flesch-Kincaid grade cap (rulebook prose only)")
+
+    mf = sub.add_parser("manifest", help="copies needed at max players, cards the rules never name")
+    mf.add_argument("cards")
+    mf.add_argument("--players", type=int, required=True)
+    mf.add_argument("--rules", help="rules file to search for card names")
 
     k = sub.add_parser("consistency", help="art outliers across a set (Pillow)")
     k.add_argument("images", nargs="+", help="image files or one folder")
@@ -270,6 +493,8 @@ def main(argv=None):
     s.add_argument("--bleed", type=float, default=0.0, help="bleed in mm included in each image")
     s.add_argument("--grid", default="3x3")
     s.add_argument("--no-marks", action="store_true")
+    s.add_argument("--backs", metavar="CARDS",
+                   help="card list with deck and back columns; fail if two decks share a back")
 
     a = ap.parse_args(argv)
     mapping = parse_map(a.map)
@@ -292,13 +517,51 @@ def main(argv=None):
             print(p)
         return 1 if probs else 0
 
+    if a.cmd == "vanilla" and a.by_rarity:
+        tol = 1.0 if a.tolerance is None else a.tolerance
+        rows, probs = vanilla_by_rarity(load_cards(a.cards, mapping), a.per_cost, a.base, tol)
+        for r, n, m in rows:
+            print(f"{r:>10} {n:>4} mean surplus {m:+.2f}")
+        for p in probs:
+            print(p)
+        return 1 if probs else 0
+
     if a.cmd == "vanilla":
-        rows = vanilla(load_cards(a.cards, mapping), a.per_cost, a.base, a.tolerance)
+        tol = 1.5 if a.tolerance is None else a.tolerance
+        rows = vanilla(load_cards(a.cards, mapping), a.per_cost, a.base, tol)
         for name, cost, stats, exp, delta, verdict in rows:
             print(f"{name}: cost {cost}, stats {stats}, expected {exp:g} ({delta:+g}, {verdict})")
         if not rows:
             print("ok")
         return 1 if rows else 0
+
+    if a.cmd == "dupes":
+        probs = dupes(load_cards(a.cards, mapping))
+        for p in probs:
+            print(f"warning: {p}")
+        if not probs:
+            print("ok")
+        return 0
+
+    if a.cmd in ("rules", "manifest"):
+        if a.cmd == "rules":
+            gloss = load_glossary(a.glossary) if a.glossary else None
+            probs = rules_lint(Path(a.file).read_text(encoding="utf-8"), gloss, a.max_words, a.max_grade)
+        else:
+            rules = Path(a.rules).read_text(encoding="utf-8") if a.rules else None
+            probs = manifest(load_cards(a.cards, mapping), a.players, rules)
+        for p in probs:
+            print(p)
+        if not probs:
+            print("ok")
+        return 1 if probs else 0
+
+    if a.cmd == "sheet" and a.backs:
+        probs = shared_backs(load_cards(a.backs, mapping))
+        for p in probs:
+            print(p)
+        if probs:
+            return 1
 
     files = a.images
     if len(files) == 1 and Path(files[0]).is_dir():
