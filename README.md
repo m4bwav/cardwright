@@ -14,7 +14,8 @@ Set-level checks for card games, as an agent plugin. Point it at a card list and
 - **Rules text**: `cw.py rules rules.md --glossary terms.txt` flags other names for a term, long sentences, ambiguous phrases, and an optional grade cap.
 - **Box manifest**: `cw.py manifest cards.csv --players 5 --rules rules.md` checks copies (`per_player`, `base`, `copies` columns) and cards the rules never name.
 - **Art consistency**: `cw.py consistency art/` flags images whose brightness, contrast or saturation stand out from the set.
-- **Print and play**: `cw.py sheet art/ --out deck.pdf --page letter --bleed 3` puts 3x3 poker cards (63x88 mm) per page with crop marks; `--backs cards.csv` fails when two decks share a back image.
+- **Print and play**: `cw.py sheet art/ --out deck.pdf --page letter --bleed 3` puts 3x3 poker cards (63x88 mm) per page with crop marks; `--backs cards.csv` fails when two decks share a back image; `--duplex back.png` adds mirrored back pages for double-sided printing.
+- **Playtest floor**: `cw.py baseline pool.csv --deck deck.csv` races a deck against a greedy bot; `cw.py matchup log.csv` keeps a deck-vs-deck ledger and flags lopsided pairs; `cw.py starter starter.csv` lints a first-game set.
 
 Card lists are CSV or JSON with `name, cost, rarity, attack, health`; remap columns with `--map cost=mana`. Balance checks need only Python 3.9+. Image commands need Pillow.
 

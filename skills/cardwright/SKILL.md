@@ -16,7 +16,10 @@ Run as `python "${CLAUDE_PLUGIN_ROOT}/scripts/cw.py" <command>`. Card list: CSV 
 3. `cw.py vanilla cards.csv --per-cost 2 --base 1` flags units whose attack plus health is far from the cost line. A smell test: read each flagged card's text before calling it broken, since abilities are upside the numbers cannot see. Fit `--per-cost` to the set's own median first.
 4. `cw.py vanilla cards.csv --by-rarity` prints the mean stat surplus per rarity and flags a tier more than 1.0 above common. Rarity is not a power budget: assume top players own every card.
 5. `cw.py dupes cards.csv` warns on exact twins (merge or differentiate) and strictly better cards at the same cost (sometimes deliberate; ask).
-6. Report the flags with a suggested fix each (cost +1, stat -1, move to uncommon). Hand changes to the project's card tool; never edit engine assets from here without the person's yes.
+6. `cw.py baseline pool.csv --deck deck.csv` races a deck against a greedy bot (best stats per cost, seeded, no blocking, 200 games) and fails under 50%. Without `--deck` it lists the greedy picks. Either way it flags autopicks: cards over 1.5x the median stats per cost, which the bot always takes first. A crude floor, not a balance proof.
+7. `cw.py matchup log.csv --record Red Blue Red` appends one playtest result (`a,b,winner`, or `draw`) and prints win rates per deck and per pair; a pair at 70% or more over 5+ games fails as lopsided.
+8. `cw.py starter starter.csv` lints a recommended first-game set: 40 cards or fewer, nothing over cost 5, 20 words of text per card at most, no high-complexity terms (`--complex "stack,instead"` replaces the default list), and an even curve.
+9. Report the flags with a suggested fix each (cost +1, stat -1, move to uncommon). Hand changes to the project's card tool; never edit engine assets from here without the person's yes.
 
 Method notes and sources: [references/balance.md](references/balance.md).
 
@@ -31,7 +34,7 @@ Method notes and sources: [references/balance.md](references/balance.md).
 
 ## Print and play
 
-`cw.py sheet <folder> --out deck.pdf --page letter --card 63x88 --bleed 3` lays 3x3 cards per page edge to edge at trim size, centred, with crop marks at the trim lines; `--bleed` says how much bleed the images carry, and it is cut off on the sheet (one cut between cards). Print houses want the full-bleed files instead. Images should be rendered at 300 DPI: 744x1039 px trim, 815x1110 px with 3 mm bleed. Tell the person to print at 100% (no "fit to page") and check one card with a ruler. Add `--backs cards.csv` (columns `deck`, `back`) to fail before rendering when two decks share a back image. Details: [references/print.md](references/print.md).
+`cw.py sheet <folder> --out deck.pdf --page letter --card 63x88 --bleed 3` lays 3x3 cards per page edge to edge at trim size, centred, with crop marks at the trim lines; `--bleed` says how much bleed the images carry, and it is cut off on the sheet (one cut between cards). Print houses want the full-bleed files instead. Images should be rendered at 300 DPI: 744x1039 px trim, 815x1110 px with 3 mm bleed. Tell the person to print at 100% (no "fit to page") and check one card with a ruler. Add `--backs cards.csv` (columns `deck`, `back`) to fail before rendering when two decks share a back image. Add `--duplex back.png` (one back for all, or one per card) for double-sided printing: each front page is followed by its back page with columns mirrored (`--flip short` mirrors rows instead for short-edge binding). Print one test sheet and hold it to the light. Details: [references/print.md](references/print.md).
 
 ## Frames
 
