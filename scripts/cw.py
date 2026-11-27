@@ -179,11 +179,23 @@ def mm_to_px(mm, dpi):
     return round(mm / MM_PER_IN * dpi)
 
 
+def back_slot(j, cols, rows, flip="long"):
+    """Grid slot on the back page for the card in front slot j. Long-edge
+    flip mirrors the column order, short-edge flip mirrors the row order."""
+    r, c = divmod(j, cols)
+    if flip == "long":
+        return r * cols + (cols - 1 - c)
+    return (rows - 1 - r) * cols + c
+
+
 def sheet(images, out, page="letter", dpi=300, card_mm=(63, 88), bleed_mm=0.0,
-          cols=3, rows=3, marks=True):
+          cols=3, rows=3, marks=True, backs=None, flip="long"):
     """Lay card images on pages, cols x rows each, centred, with crop marks.
     Cards sit edge to edge at trim size; an image with bleed_mm of bleed has
     the bleed cut off first (3x3 poker cards with bleed do not fit Letter).
+    With backs (one image for all, or one per card) each front page is
+    followed by its back page, slots mirrored for the flip edge, so a duplex
+    print lines each back up behind its front.
     Returns the list of files written (one PNG per page, or one PDF)."""
     from PIL import Image, ImageDraw
     pages_mm = {"letter": (215.9, 279.4), "a4": (210.0, 297.0)}
@@ -193,11 +205,20 @@ def sheet(images, out, page="letter", dpi=300, card_mm=(63, 88), bleed_mm=0.0,
         die(f"{cols}x{rows} cards of {card_mm[0]}x{card_mm[1]} mm do not fit on {page}")
     x0, y0 = (pw - cols * cw) // 2, (ph - rows * ch) // 2
     per = cols * rows
-    pages = []
+    if backs is not None and len(backs) not in (1, len(images)):
+        die(f"--duplex: {len(backs)} back images for {len(images)} cards (give 1 or one per card)")
+    jobs = []
     for i in range(0, len(images), per):
+        chunk = images[i:i + per]
+        jobs.append(list(enumerate(chunk)))
+        if backs is not None:
+            bk = [backs[0] if len(backs) == 1 else backs[i + j] for j in range(len(chunk))]
+            jobs.append([(back_slot(j, cols, rows, flip), b) for j, b in enumerate(bk)])
+    pages = []
+    for job in jobs:
         pg = Image.new("RGB", (pw, ph), "white")
         d = ImageDraw.Draw(pg)
-        for j, path in enumerate(images[i:i + per]):
+        for j, path in job:
             card = Image.open(path).convert("RGB")
             if bleed_mm:
                 bx = round(card.width * bleed_mm / (card_mm[0] + 2 * bleed_mm))
@@ -435,6 +456,161 @@ def manifest(cards, players, rules_text=None):
     return probs
 
 
+# ---- baseline (greedy bot) --------------------------------------------------
+
+def card_value(c):
+    return sum(_stats(c).values())
+
+
+def value_ratio(c):
+    cost = num(c.get("cost")) or 0
+    return card_value(c) / max(cost, 1)
+
+
+def greedy_deck(pool, size):
+    """The greedy baseline: take the best stats-per-cost card again and again
+    (respecting copies, default 1 each; cycles the pool if it runs out)."""
+    ranked = sorted(pool, key=lambda c: (-value_ratio(c), num(c.get("cost")) or 0))
+    out = []
+    for c in ranked:
+        n = num(c.get("copies"))
+        out += [c] * int(1 if n is None else n)
+    if not out:
+        return []
+    while len(out) < size:
+        out += out
+    return out[:size]
+
+
+def _attack(c):
+    v = c.get("attack")
+    return num(v if v not in (None, "") else c.get("power")) or 0
+
+
+def race(deck_a, deck_b, games=200, seed=1, life=20, hand=3, max_turns=30):
+    """Seeded no-blocking race: mana = turn number (cap 10), play the best
+    stats-per-cost cards that fit, every unit hits the opponent each turn.
+    Players alternate going first. Returns (wins_a, wins_b, draws)."""
+    import random
+    rng = random.Random(seed)
+    tally = [0, 0, 0]
+    for g in range(games):
+        decks = [list(deck_a), list(deck_b)]
+        for d in decks:
+            rng.shuffle(d)
+        hands = [[d.pop() for _ in range(min(hand, len(d)))] for d in decks]
+        board, hp = [0, 0], [life, life]
+        order = (0, 1) if g % 2 == 0 else (1, 0)
+        winner = None
+        for turn in range(1, max_turns + 1):
+            for me in order:
+                if decks[me]:
+                    hands[me].append(decks[me].pop())
+                mana = min(turn, 10)
+                for c in sorted(hands[me], key=lambda c: -value_ratio(c)):
+                    cost = num(c.get("cost")) or 0
+                    if cost <= mana:
+                        mana -= cost
+                        hands[me].remove(c)
+                        board[me] += _attack(c)
+                hp[1 - me] -= board[me]
+                if hp[1 - me] <= 0:
+                    winner = me
+                    break
+            if winner is not None:
+                break
+        tally[2 if winner is None else winner] += 1
+    return tuple(tally)
+
+
+def autopicks(pool, factor=1.5):
+    """Cards whose stats per cost beat the pool median by `factor`: the greedy
+    bot takes them first every time."""
+    ratios = [value_ratio(c) for c in pool if _stats(c)]
+    if not ratios:
+        return []
+    med = statistics.median(ratios)
+    return [f"autopick: {c.get('name', '?')} gives {value_ratio(c):.2f} stats per cost "
+            f"(pool median {med:.2f})" for c in pool if _stats(c) and value_ratio(c) > med * factor]
+
+
+# ---- matchup ledger ---------------------------------------------------------
+
+def matchups(rows, min_games=5, lopsided=0.70):
+    """Rows with a, b, winner (a deck name, or draw). Returns per-deck lines,
+    per-pair lines and problems for pairs at or past `lopsided` either way.
+    A draw counts half a win."""
+    decks, pairs = {}, {}
+    for r in rows:
+        a, b = (r.get("a") or "").strip(), (r.get("b") or "").strip()
+        w = (r.get("winner") or "").strip()
+        if not a or not b:
+            continue
+        if w not in (a, b, "draw"):
+            die(f"matchup: winner '{w}' is neither {a}, {b} nor draw")
+        for x in (a, b):
+            decks.setdefault(x, [0, 0, 0])
+        key = tuple(sorted((a, b)))
+        pairs.setdefault(key, [0, 0, 0])
+        if w == "draw":
+            decks[a][2] += 1
+            decks[b][2] += 1
+            pairs[key][2] += 1
+        else:
+            loser = b if w == a else a
+            decks[w][0] += 1
+            decks[loser][1] += 1
+            pairs[key][0 if w == key[0] else 1] += 1
+
+    def rate(w, l, d):
+        return (w + d / 2) / max(w + l + d, 1)
+
+    lines, probs = [], []
+    for d, t in sorted(decks.items(), key=lambda kv: (-rate(*kv[1]), kv[0])):
+        lines.append(f"{d}: {t[0]}-{t[1]}-{t[2]} ({rate(*t):.0%})")
+    for (x, y), (wx, wy, dr) in sorted(pairs.items()):
+        n, r = wx + wy + dr, rate(wx, wy, dr)
+        line = f"{x} vs {y}: {wx}-{wy}-{dr} ({r:.0%} for {x})"
+        if n < min_games:
+            line += f" (under {min_games} games)"
+        elif r >= lopsided or r <= 1 - lopsided:
+            hi, lo, rr = (x, y, r) if r >= 0.5 else (y, x, 1 - r)
+            probs.append(f"lopsided: {hi} beats {lo} {rr:.0%} over {n} games")
+        lines.append(line)
+    return lines, probs
+
+
+# ---- starter set lint -------------------------------------------------------
+
+DEFAULT_COMPLEX = ("instead", "copy", "stack", "interrupt", "replace", "any time",
+                   "respond", "counter", "swap", "steal")
+
+
+def starter(cards, max_cards=40, max_cost=5, max_words=20, complex_terms=DEFAULT_COMPLEX,
+            max_share=0.35):
+    """A first-game set: small, cheap, plain text, an even curve. Flags size,
+    costs over max_cost, cards with more than max_words of text, text with a
+    high-complexity term, and the curve problems from `curve`."""
+    probs = []
+    if len(cards) > max_cards:
+        probs.append(f"size: {len(cards)} cards, a first game wants {max_cards} or fewer")
+    for c in cards:
+        n = c.get("name", "?")
+        cost = num(c.get("cost"))
+        if cost is not None and cost > max_cost:
+            probs.append(f"cost: {n} costs {cost:g}, over the starter cap {max_cost:g}")
+        text = str(c.get("text") or "")
+        words = len(text.split())
+        if words > max_words:
+            probs.append(f"wordy: {n} has {words} words of text (cap {max_words})")
+        low = text.lower()
+        hits = [t for t in complex_terms if re.search(r"\b" + re.escape(t.lower()) + r"\b", low)]
+        if hits:
+            probs.append(f"complex: {n} uses {', '.join(hits)}")
+    probs += curve_problems(curve(cards), max_share)
+    return probs
+
+
 # ---- main -----------------------------------------------------------------
 
 def parse_map(s):
@@ -479,6 +655,28 @@ def main(argv=None):
     mf.add_argument("--players", type=int, required=True)
     mf.add_argument("--rules", help="rules file to search for card names")
 
+    bl = sub.add_parser("baseline", help="greedy bot every deck must beat")
+    bl.add_argument("pool", help="card pool the greedy bot builds from")
+    bl.add_argument("--deck", help="deck list to race against the greedy deck")
+    bl.add_argument("--size", type=int, default=20)
+    bl.add_argument("--games", type=int, default=200)
+    bl.add_argument("--seed", type=int, default=1)
+    bl.add_argument("--min-win", type=float, default=0.5)
+    bl.add_argument("--factor", type=float, default=1.5, help="autopick: ratio over pool median")
+
+    mu = sub.add_parser("matchup", help="deck-vs-deck win/loss ledger")
+    mu.add_argument("log", help="CSV with a, b, winner (deck name or draw)")
+    mu.add_argument("--record", nargs=3, metavar=("A", "B", "WINNER"), help="append one result first")
+    mu.add_argument("--min-games", type=int, default=5)
+    mu.add_argument("--lopsided", type=float, default=0.70)
+
+    st = sub.add_parser("starter", help="recommended first-game set lint")
+    st.add_argument("cards")
+    st.add_argument("--max-cards", type=int, default=40)
+    st.add_argument("--max-cost", type=float, default=5)
+    st.add_argument("--max-words", type=int, default=20)
+    st.add_argument("--complex", help="comma-separated high-complexity terms (replaces the default list)")
+
     k = sub.add_parser("consistency", help="art outliers across a set (Pillow)")
     k.add_argument("images", nargs="+", help="image files or one folder")
     k.add_argument("--z", type=float, default=2.0)
@@ -495,6 +693,10 @@ def main(argv=None):
     s.add_argument("--no-marks", action="store_true")
     s.add_argument("--backs", metavar="CARDS",
                    help="card list with deck and back columns; fail if two decks share a back")
+    s.add_argument("--duplex", nargs="+", metavar="BACK",
+                   help="back image(s): one for all, or one per card; adds mirrored back pages")
+    s.add_argument("--flip", choices=["long", "short"], default="long",
+                   help="duplex binding edge (long: columns mirrored, short: rows)")
 
     a = ap.parse_args(argv)
     mapping = parse_map(a.map)
@@ -556,6 +758,48 @@ def main(argv=None):
             print("ok")
         return 1 if probs else 0
 
+    if a.cmd == "baseline":
+        pool = load_cards(a.pool, mapping)
+        greedy = greedy_deck(pool, a.size)
+        if not greedy:
+            die("baseline: empty pool")
+        probs = autopicks(pool, a.factor)
+        if a.deck:
+            w, l, d = race(load_cards(a.deck, mapping), greedy, a.games, a.seed)
+            rate = (w + d / 2) / a.games
+            print(f"deck vs greedy: {w}-{l}-{d} over {a.games} games ({rate:.0%})")
+            if rate < a.min_win:
+                probs.append(f"baseline: deck wins {rate:.0%} against the greedy bot "
+                             f"(needs {a.min_win:.0%})")
+        else:
+            print("greedy picks: " + ", ".join(c.get("name", "?") for c in greedy))
+        for p in probs:
+            print(p)
+        return 1 if probs else 0
+
+    if a.cmd == "matchup":
+        log = Path(a.log)
+        if a.record:
+            new = not log.exists() or log.stat().st_size == 0
+            with open(log, "a", encoding="utf-8", newline="") as f:
+                wr = csv.writer(f, lineterminator="\n")
+                if new:
+                    wr.writerow(["a", "b", "winner"])
+                wr.writerow(a.record)
+        lines, probs = matchups(load_cards(log), a.min_games, a.lopsided)
+        for x in lines + probs:
+            print(x)
+        return 1 if probs else 0
+
+    if a.cmd == "starter":
+        terms = [t.strip() for t in a.complex.split(",") if t.strip()] if a.complex else DEFAULT_COMPLEX
+        probs = starter(load_cards(a.cards, mapping), a.max_cards, a.max_cost, a.max_words, terms)
+        for p in probs:
+            print(p)
+        if not probs:
+            print("ok")
+        return 1 if probs else 0
+
     if a.cmd == "sheet" and a.backs:
         probs = shared_backs(load_cards(a.backs, mapping))
         for p in probs:
@@ -586,7 +830,8 @@ def main(argv=None):
     if a.cmd == "sheet":
         w, h = (float(x) for x in a.card.lower().split("x"))
         cols, rows = (int(x) for x in a.grid.lower().split("x"))
-        out = sheet(files, a.out, a.page, a.dpi, (w, h), a.bleed, cols, rows, not a.no_marks)
+        out = sheet(files, a.out, a.page, a.dpi, (w, h), a.bleed, cols, rows, not a.no_marks,
+                    a.duplex, a.flip)
         for f in out:
             print(f)
         return 0
